@@ -25,7 +25,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
+    'app_rotas',  
     # Extras
     'corsheaders',  # para habilitar CORS
     # 'rotas',       # descomente quando criar o app
