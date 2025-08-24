@@ -54,6 +54,16 @@ def _sanitize_avoids(avoid_features):
         return []
     return [a for a in avoid_features if a in _ALLOWED_AVOIDS]
 
+def _kg_to_t_if_needed(v):
+    """Converte kg para toneladas se parecer estar em kg (v > 1000)."""
+    if v is None:
+        return None
+    try:
+        v = float(v)
+    except Exception:
+        return v
+    return v / 1000.0 if v > 1000 else v
+
 def _call_ors_directions(profile, payload):
     try:
         r = _session.post(
@@ -166,8 +176,11 @@ def rota_carro(request):
             "coordinates": coords,
             "instructions": True,
         }
+        options = {}
         if avoid:
-            payload["options"] = {"avoid_features": avoid}
+            options["avoid_features"] = avoid
+        if options:
+            payload["options"] = options
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -205,11 +218,11 @@ def rota_caminhao(request):
 
         truck = body.get("truck", {})
         restrictions = {
-            "height": truck.get("height"),
-            "width": truck.get("width"),
-            "length": truck.get("length"),
-            "weight": truck.get("weight"),
-            "axleload": truck.get("axleload"),
+            "height":   truck.get("height"),
+            "width":    truck.get("width"),
+            "length":   truck.get("length"),
+            "weight":   _kg_to_t_if_needed(truck.get("weight")),     # toneladas
+            "axleload": _kg_to_t_if_needed(truck.get("axleload")),   # toneladas
         }
         restrictions = {k: v for k, v in restrictions.items() if v is not None}
 
@@ -219,10 +232,15 @@ def rota_caminhao(request):
             "coordinates": coords,
             "instructions": True,
         }
+        options = {}
         if avoid:
-            payload["options"] = {"avoid_features": avoid}
+            options["avoid_features"] = avoid
         if restrictions:
-            payload["profile_params"] = {"restrictions": restrictions}
+            options["profile_params"] = {"restrictions": restrictions}
+        # informe o tipo de veículo (recomendado p/ driving-hgv)
+        options["vehicle_type"] = "hgv"
+        if options:
+            payload["options"] = options
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
