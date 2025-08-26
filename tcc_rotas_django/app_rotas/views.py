@@ -104,11 +104,14 @@ def health(request):
 def geocode_search(request):
     """
     POST /api/geocode
-    Body:
+    Body (todos os campos opcionais exceto q):
     {
-      "q": "rua, cidade",
-      "limit": 5,          # opcional
-      "country": "BR"      # opcional (prioriza país)
+      "q": "texto de busca",                 # obrigatório
+      "limit": 5,                            # default=5
+      "country": "BR",                       # default="BR" (Brasil inteiro). Envie "" para sem filtro de país.
+      "lang": "pt",                          # default="pt"
+      "focus_lat": -23.5, "focus_lng": -46.6,# prioridade perto de um ponto (não restringe)
+      "rect_north": -22.0, "rect_south": -24.0, "rect_east": -43.0, "rect_west": -46.0  # restringe à área visível
     }
     """
     if request.method != "POST":
@@ -123,15 +126,35 @@ def geocode_search(request):
             return JsonResponse({"error": "q (texto de busca) é obrigatório"}, status=400)
 
         size = int(body.get("limit") or 5)
-        country = (body.get("country") or "").strip()
+        country = body.get("country")
+        # Brasil por padrão; se quiser mundo todo, envie country = "" no request
+        if country is None:
+            country = "BR"
+        lang = (body.get("lang") or "pt").strip()
 
         params = {
             "api_key": ORS_KEY,
             "text": q,
-            "size": size
+            "size": size,
+            "lang": lang,
         }
-        if country:
-            params["boundary.country"] = country
+
+        # Filtro por país: só aplica se for string não vazia
+        if isinstance(country, str) and country.strip():
+            params["boundary.country"] = country.strip()
+
+        # Priorizar um ponto (não restringe resultados)
+        if body.get("focus_lat") is not None and body.get("focus_lng") is not None:
+            params["focus.point.lat"] = float(body["focus_lat"])
+            params["focus.point.lon"] = float(body["focus_lng"])
+
+        # Restringir pelo retângulo da área visível (se os 4 valores vierem)
+        rect_keys = ["rect_north", "rect_south", "rect_east", "rect_west"]
+        if all(k in body for k in rect_keys):
+            params["boundary.rect.min_lat"] = float(body["rect_south"])
+            params["boundary.rect.min_lon"] = float(body["rect_west"])
+            params["boundary.rect.max_lat"] = float(body["rect_north"])
+            params["boundary.rect.max_lon"] = float(body["rect_east"])
 
         r = _session.get("https://api.openrouteservice.org/geocode/search", params=params, timeout=DEFAULT_TIMEOUT)
         data = r.json()

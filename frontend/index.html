@@ -7,140 +7,239 @@
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
-    html, body { height:100%; margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial }
-    #map { position: absolute; top:0; right:0; bottom:0; left:320px; }
-    .panel {
-      position:absolute; top:0; left:0; bottom:0; width:320px; background:#fff; border-right:1px solid #eee; padding:14px 12px; overflow:auto;
-      box-shadow: 0 2px 10px rgba(0,0,0,.05);
+    :root {
+      --bg: #ffffff;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --brand: #111827;
+      --brand-weak: #e9ecef;
+      --pill: #f3f4f6;
+      --shadow: 0 8px 30px rgba(0,0,0,.06);
     }
-    .panel h2 { margin: 0 0 12px; font-size: 18px; }
-    .field { margin-bottom:10px }
-    label { display:block; font-size:12px; color:#444; margin-bottom:4px }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f15;
+        --card: #121821;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --border: #1f2937;
+        --brand: #f9fafb;
+        --brand-weak: #243447;
+        --pill: #1f2937;
+        --shadow: 0 8px 30px rgba(0,0,0,.35);
+      }
+    }
+    * { box-sizing: border-box }
+    html, body { height:100%; margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial }
+    .app {
+      display:grid; grid-template-columns: min(380px, 100%) 1fr; height:100%;
+    }
+    .panel {
+      padding:16px; border-right:1px solid var(--border); background:var(--card);
+      box-shadow: var(--shadow); z-index:10; overflow:auto;
+    }
+    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px }
+    .title { font-size:18px; font-weight:700 }
+    .badge { font-size:12px; color:var(--muted) }
+    .field { margin:10px 0 }
+    label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px }
     input[type="text"], input[type="number"], select {
-      width:100%; padding:8px; border:1px solid #ddd; border-radius:8px; outline:none;
+      width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:transparent; color:var(--text); outline:none;
     }
     .row { display:flex; gap:8px }
     .row > .col { flex:1 }
     .btn {
-      display:inline-block; padding:10px 12px; border-radius:10px; border:0; background:#111; color:#fff; cursor:pointer;
+      display:inline-flex; align-items:center; gap:8px;
+      padding:10px 12px; border-radius:12px; border:1px solid transparent; cursor:pointer; user-select:none;
+      background:var(--brand); color:var(--bg); font-weight:600;
     }
-    .btn.secondary { background:#e9ecef; color:#111 }
-    .muted { color:#666; font-size:12px }
-    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#f2f2f2; margin-right:6px; font-size:12px }
-    .results { margin-top:10px }
-    .result-item { font-size:13px; padding:6px 8px; border-radius:6px; cursor:pointer }
-    .result-item:hover { background:#f5f5f5 }
-    .metrics { margin-top:10px; padding:8px; background:#f8f9fa; border:1px solid #eee; border-radius:10px; font-size:13px }
+    .btn.secondary { background:var(--brand-weak); color:var(--text) }
+    .btn.ghost { background:transparent; border-color:var(--border); color:var(--text) }
+    .muted { color:var(--muted); font-size:12px }
+    .results { margin-top:8px; border:1px solid var(--border); border-radius:12px; overflow:hidden }
+    .result-item { font-size:13px; padding:8px 10px; cursor:pointer; border-bottom:1px solid var(--border); background:transparent }
+    .result-item:last-child { border-bottom:0 }
+    .result-item:hover { background:rgba(127,127,127,.08) }
+    .metrics { margin-top:12px; padding:10px; border:1px solid var(--border); border-radius:12px; background:transparent; font-size:13px }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:var(--pill); margin-right:6px; font-size:12px }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px }
+    .switch { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted) }
+
+    #map { position: relative; height:100%; width:100%; }
+    .map-wrap { position:relative }
+    .toast {
+      position:fixed; right:16px; bottom:16px; background:#ef4444; color:#fff; padding:10px 12px; border-radius:10px;
+      box-shadow: var(--shadow); font-size:13px; display:none;
+    }
+    .loading {
+      display:none; font-size:12px; color:var(--muted); margin-left:8px;
+    }
+    .divider { height:1px; background:var(--border); margin:12px 0 }
   </style>
 </head>
 <body>
-  <div class="panel">
-    <h2>Gerador de Rotas (ORS)</h2>
-
-    <div class="field">
-      <label>Modo de Rota</label>
-      <select id="mode">
-        <option value="car">Carro (baseline)</option>
-        <option value="hgv" selected>Caminhão (driving-hgv)</option>
-      </select>
-    </div>
-
-    <div class="field">
-      <label>Origem</label>
-      <div class="row">
-        <div class="col"><input id="origin" type="text" placeholder="ex.: Av. Brasil, Foz do Iguaçu"/></div>
-        <button class="btn secondary" id="btnGeocodeOrigin" title="Buscar endereço">Buscar</button>
+  <div class="app">
+    <aside class="panel">
+      <div class="header">
+        <div>
+          <div class="title">Gerador de Rotas (ORS)</div>
+          <div class="badge">Leaflet + Django API</div>
+        </div>
+        <button class="btn ghost" id="btnClear" title="Limpar tudo">Limpar</button>
       </div>
-      <div id="resultsOrigin" class="results"></div>
-      <div class="muted">Dica: clique no mapa para definir origem/destino rapidamente.</div>
-    </div>
 
-    <div class="field">
-      <label>Destino</label>
-      <div class="row">
-        <div class="col"><input id="destination" type="text" placeholder="ex.: Ponte da Amizade"/></div>
-        <button class="btn secondary" id="btnGeocodeDest" title="Buscar endereço">Buscar</button>
+      <div class="field">
+        <label>Modo de Rota</label>
+        <div class="row">
+          <div class="col">
+            <select id="mode">
+              <option value="car">Carro (driving-car)</option>
+              <option value="hgv" selected>Caminhão (driving-hgv)</option>
+            </select>
+          </div>
+          <button class="btn secondary" id="btnSwap" title="Inverter origem e destino">⟲ Inverter</button>
+        </div>
       </div>
-      <div id="resultsDest" class="results"></div>
-    </div>
 
-    <div class="field">
-      <label>Paradas (waypoints) — opcional</label>
-      <input id="waypoints" type="text" placeholder="lat,lng; lat,lng (ex.: -25.50,-54.60; -25.49,-54.59)"/>
-    </div>
-
-    <div class="field">
-      <label>Evitar trechos</label>
-      <div>
-        <label><input type="checkbox" id="avoidTollways"/> Pedágios</label>
-        <label><input type="checkbox" id="avoidFerries"/> Balsas</label>
-        <label><input type="checkbox" id="avoidHighways"/> Rodovias</label>
+      <div class="field">
+        <label>Origem</label>
+        <div class="row">
+          <div class="col"><input id="origin" type="text" placeholder="ex.: Shopping JL Cataratas, Foz do Iguaçu"/></div>
+          <button class="btn secondary" id="btnGeocodeOrigin" title="Buscar endereço">Buscar</button>
+        </div>
+        <div class="toolbar">
+          <button class="btn ghost" id="btnUseMyLocation">Usar minha localização</button>
+          <span class="loading" id="originLoading">buscando…</span>
+        </div>
+        <div id="resultsOrigin" class="results" style="display:none"></div>
       </div>
-    </div>
 
-    <div class="field" id="truckFields">
-      <label>Restrição do Caminhão (HGV)</label>
-      <div class="row">
-        <div class="col"><input id="height" type="number" step="0.01" placeholder="Altura (m)"/></div>
-        <div class="col"><input id="width" type="number" step="0.01" placeholder="Largura (m)"/></div>
+      <div class="field">
+        <label>Destino</label>
+        <div class="row">
+          <div class="col"><input id="destination" type="text" placeholder="ex.: Uniamérica Descomplica, Foz do Iguaçu"/></div>
+          <button class="btn secondary" id="btnGeocodeDest" title="Buscar endereço">Buscar</button>
+        </div>
+        <div id="resultsDest" class="results" style="display:none"></div>
       </div>
-      <div class="row">
-        <div class="col"><input id="length" type="number" step="0.1" placeholder="Comprimento (m)"/></div>
-        <div class="col"><input id="weight" type="number" step="10" placeholder="Peso total (kg)"/></div>
-      </div>
-      <div class="row">
-        <div class="col"><input id="axleload" type="number" step="10" placeholder="Carga por eixo (kg)"/></div>
-      </div>
-      <div class="muted">Preencha apenas o que for necessário. Valores vazios não serão enviados.</div>
-    </div>
 
-    <div class="field">
-      <button class="btn" id="btnRoute">Traçar rota</button>
-      <button class="btn secondary" id="btnClear" style="float:right">Limpar</button>
-    </div>
+      <div class="field">
+        <label>Paradas (waypoints) — opcional</label>
+        <input id="waypoints" type="text" placeholder="lat,lng; lat,lng (ex.: -25.50,-54.60; -25.49,-54.59)"/>
+      </div>
 
-    <div class="metrics" id="metrics" style="display:none"></div>
+      <div class="divider"></div>
+
+      <div class="field">
+        <label>Escopo da busca</label>
+        <div class="row">
+          <div class="col">
+            <select id="country">
+              <option value="BR" selected>Brasil</option>
+              <option value="">Mundo inteiro</option>
+            </select>
+          </div>
+          <label class="switch"><input type="checkbox" id="useBounds"/> Usar área visível</label>
+        </div>
+        <div class="muted">Com “Usar área visível”, o geocode restringe aos bounds atuais do mapa.</div>
+      </div>
+
+      <div class="field">
+        <label>Evitar trechos</label>
+        <div class="row">
+          <label class="switch"><input type="checkbox" id="avoidTollways"/> Pedágios</label>
+          <label class="switch"><input type="checkbox" id="avoidFerries"/> Balsas</label>
+          <label class="switch"><input type="checkbox" id="avoidHighways"/> Rodovias</label>
+        </div>
+      </div>
+
+      <div class="field" id="truckFields">
+        <label>Restrição do Caminhão (HGV)</label>
+        <div class="row">
+          <div class="col"><input id="height" type="number" step="0.01" placeholder="Altura (m)"/></div>
+          <div class="col"><input id="width" type="number" step="0.01" placeholder="Largura (m)"/></div>
+        </div>
+        <div class="row">
+          <div class="col"><input id="length" type="number" step="0.1" placeholder="Comprimento (m)"/></div>
+          <div class="col"><input id="weight" type="number" step="10" placeholder="Peso total (kg)"/></div>
+        </div>
+        <div class="row">
+          <div class="col"><input id="axleload" type="number" step="10" placeholder="Carga por eixo (kg)"/></div>
+        </div>
+        <div class="muted">Preencha apenas o necessário. (Peso/eixo em kg — o backend converte para t.)</div>
+      </div>
+
+      <div class="field">
+        <div class="row">
+          <button class="btn" id="btnRoute">Traçar rota</button>
+          <span class="loading" id="routeLoading">calculando…</span>
+        </div>
+      </div>
+
+      <div class="metrics" id="metrics" style="display:none"></div>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+    </main>
   </div>
 
-  <div id="map"></div>
+  <div class="toast" id="toast"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const API_BASE = "http://localhost:8000/api";
+    // ===== Config =====
+    const API_BASE = `http://${location.hostname}:8000/api`;
 
-    // Mapa
-    const map = L.map('map').setView([-25.516, -54.585], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // ===== UI helpers =====
+    const $ = (id) => document.getElementById(id);
+    const show = (el, on=true) => el.style.display = on ? '' : 'none';
+    const toast = (msg) => { const el = $('toast'); el.textContent = msg; show(el, true); setTimeout(()=>show(el,false), 2600); };
+    const debounce = (fn, ms=300) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+
+    // ===== Map =====
+    const map = L.map('map', { zoomControl: true }).setView([-23.55, -46.63], 5);
+    const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
     let originMarker = null, destMarker = null, routeLayer = null;
-    let activeField = "origin"; // qual input preencher ao clicar no mapa
+    let activeField = "origin";
 
     function setActive(field) { activeField = field; }
+    $('origin').addEventListener('focus', () => setActive('origin'));
+    $('destination').addEventListener('focus', () => setActive('destination'));
 
-    document.getElementById('origin').addEventListener('focus', () => setActive('origin'));
-    document.getElementById('destination').addEventListener('focus', () => setActive('destination'));
+    function createDraggableMarker(lat, lng, label) {
+      const m = L.marker([lat, lng], { draggable:true }).addTo(map).bindPopup(label);
+      m.on('dragend', () => {
+        const { lat, lng } = m.getLatLng();
+        if (label === 'Origem') $('origin').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        if (label === 'Destino') $('destination').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        route(); // retraça ao arrastar
+      });
+      return m;
+    }
 
     map.on('click', (e) => {
       const { lat, lng } = e.latlng;
       if (activeField === 'origin') {
         if (originMarker) map.removeLayer(originMarker);
-        originMarker = L.marker([lat, lng], { draggable:true }).addTo(map).bindPopup('Origem').openPopup();
-        originMarker.on('dragend', ()=> {});
-        document.getElementById('origin').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        originMarker = createDraggableMarker(lat, lng, 'Origem');
+        $('origin').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
         setActive('destination');
       } else {
         if (destMarker) map.removeLayer(destMarker);
-        destMarker = L.marker([lat, lng], { draggable:true }).addTo(map).bindPopup('Destino').openPopup();
-        destMarker.on('dragend', ()=> {});
-        document.getElementById('destination').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        destMarker = createDraggableMarker(lat, lng, 'Destino');
+        $('destination').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
         setActive('origin');
       }
     });
 
+    // ===== Parsing / Geocode =====
     function parseLatLng(text) {
-      // aceita "lat,lng"
       const p = text.split(",").map(x=>x.trim());
       if (p.length !== 2) return null;
       const lat = parseFloat(p[0]), lng = parseFloat(p[1]);
@@ -148,151 +247,228 @@
       return { lat, lng };
     }
 
+    function getGeocodePayload(q) {
+      const payload = { q, limit: 8, lang: "pt", country: $('country').value };
+      if ($('useBounds').checked) {
+        const b = map.getBounds();
+        payload.rect_north = b.getNorth();
+        payload.rect_south = b.getSouth();
+        payload.rect_east  = b.getEast();
+        payload.rect_west  = b.getWest();
+      } else {
+        const c = map.getCenter();
+        payload.focus_lat = c.lat; payload.focus_lng = c.lng;
+      }
+      return payload;
+    }
+
     async function geocode(q, slot) {
+      const payload = getGeocodePayload(q);
       const r = await fetch(`${API_BASE}/geocode`, {
         method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ q, limit: 5, country: "BR" })
+        body: JSON.stringify(payload)
       });
       const data = await r.json();
-      const target = document.getElementById(slot === 'origin' ? 'resultsOrigin' : 'resultsDest');
+      const target = (slot === 'origin') ? $('resultsOrigin') : $('resultsDest');
       target.innerHTML = "";
-      (data.results || []).forEach((res) => {
+      if (!Array.isArray(data.results) || !data.results.length) {
+        show(target, false);
+        toast("Nenhum endereço encontrado.");
+        return;
+      }
+      data.results.forEach((res) => {
         const div = document.createElement('div');
         div.className = "result-item";
         div.textContent = res.label;
         div.onclick = () => {
           const val = `${res.lat.toFixed(6)}, ${res.lng.toFixed(6)}`;
           if (slot === 'origin') {
-            document.getElementById('origin').value = val;
+            $('origin').value = val;
             if (originMarker) map.removeLayer(originMarker);
-            originMarker = L.marker([res.lat, res.lng]).addTo(map).bindPopup('Origem');
-            map.setView([res.lat, res.lng], 14);
+            originMarker = createDraggableMarker(res.lat, res.lng, 'Origem');
           } else {
-            document.getElementById('destination').value = val;
+            $('destination').value = val;
             if (destMarker) map.removeLayer(destMarker);
-            destMarker = L.marker([res.lat, res.lng]).addTo(map).bindPopup('Destino');
-            map.setView([res.lat, res.lng], 14);
+            destMarker = createDraggableMarker(res.lat, res.lng, 'Destino');
           }
-          target.innerHTML = "";
+          map.setView([res.lat, res.lng], Math.max(map.getZoom(), 14));
+          show(target, false);
         };
         target.appendChild(div);
       });
+      show(target, true);
     }
 
-    document.getElementById('btnGeocodeOrigin').onclick = () => {
-      const q = document.getElementById('origin').value.trim();
-      if (!q) return alert("Digite algo para buscar a origem");
+    // autocomplete (debounce)
+    $('origin').addEventListener('input', debounce((e)=>{
+      const q = e.target.value.trim(); if (!q || parseLatLng(q)) { show($('resultsOrigin'), false); return; }
+      geocode(q, 'origin');
+    }, 350));
+    $('destination').addEventListener('input', debounce((e)=>{
+      const q = e.target.value.trim(); if (!q || parseLatLng(q)) { show($('resultsDest'), false); return; }
+      geocode(q, 'destination');
+    }, 350));
+
+    $('btnGeocodeOrigin').onclick = () => {
+      const q = $('origin').value.trim(); if (!q) return toast("Digite algo para buscar a origem");
       geocode(q, 'origin');
     };
-    document.getElementById('btnGeocodeDest').onclick = () => {
-      const q = document.getElementById('destination').value.trim();
-      if (!q) return alert("Digite algo para buscar o destino");
+    $('btnGeocodeDest').onclick = () => {
+      const q = $('destination').value.trim(); if (!q) return toast("Digite algo para buscar o destino");
       geocode(q, 'destination');
     };
 
-    function getAvoidFeatures() {
-      const a = [];
-      if (document.getElementById('avoidTollways').checked) a.push('tollways');
-      if (document.getElementById('avoidFerries').checked) a.push('ferries');
-      if (document.getElementById('avoidHighways').checked) a.push('highways');
-      return a;
+    async function resolveByGeocode(text) {
+      const payload = getGeocodePayload(text);
+      const r = await fetch(`${API_BASE}/geocode`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      const data = await r.json();
+      return (data.results && data.results[0]) ? data.results[0] : null;
     }
 
+    async function resolveInputToLatLng(text) {
+      const parsed = parseLatLng(text);
+      if (parsed) return parsed;
+      const res = await resolveByGeocode(text);
+      if (!res) return null;
+      return { lat: res.lat, lng: res.lng };
+    }
+
+    // ===== Avoid / Waypoints =====
+    function getAvoidFeatures() {
+      const a = [];
+      if ($('avoidTollways').checked) a.push('tollways');
+      if ($('avoidFerries').checked) a.push('ferries');
+      if ($('avoidHighways').checked) a.push('highways');
+      return a;
+    }
     function parseWaypoints() {
-      const text = document.getElementById('waypoints').value.trim();
+      const text = $('waypoints').value.trim();
       if (!text) return [];
       return text.split(";").map(s=>s.trim()).map(parseLatLng).filter(Boolean);
     }
 
     function showMetrics(summary) {
-      const el = document.getElementById('metrics');
-      if (!summary) {
-        el.style.display = 'none'; return;
-      }
+      const el = $('metrics');
+      if (!summary) { show(el, false); return; }
       const km = (summary.distance_m / 1000).toFixed(2);
       const min = Math.round(summary.duration_s / 60);
       el.innerHTML = `
         <div><span class="pill">Distância</span> ${km} km</div>
         <div><span class="pill">Duração</span> ${min} min</div>
       `;
-      el.style.display = 'block';
+      show(el, true);
     }
 
+    // ===== Route =====
     async function route() {
-      // lê origem e destino (aceita lat,lng)
-      const oTxt = document.getElementById('origin').value.trim();
-      const dTxt = document.getElementById('destination').value.trim();
-      const o = parseLatLng(oTxt);
-      const d = parseLatLng(dTxt);
-      if (!o || !d) return alert("Use 'lat,lng' ou faça geocoding para origem e destino.");
-
-      const waypoints = parseWaypoints();
-      const avoid_features = getAvoidFeatures();
-
-      const mode = document.getElementById('mode').value;
-      let url = `${API_BASE}/rota-carro`;
-      let body = { origin: o, destination: d, waypoints, avoid_features };
-
-      if (mode === 'hgv') {
-        url = `${API_BASE}/rota-caminhao`;
-        const truck = {};
-        const h = parseFloat(document.getElementById('height').value);
-        const w = parseFloat(document.getElementById('width').value);
-        const l = parseFloat(document.getElementById('length').value);
-        const wt = parseFloat(document.getElementById('weight').value);
-        const ax = parseFloat(document.getElementById('axleload').value);
-        if (!Number.isNaN(h)) truck.height = h;
-        if (!Number.isNaN(w)) truck.width = w;
-        if (!Number.isNaN(l)) truck.length = l;
-        if (!Number.isNaN(wt)) truck.weight = wt;
-        if (!Number.isNaN(ax)) truck.axleload = ax;
-        body.truck = truck;
-      }
-
-      const r = await fetch(url, {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(body)
-      });
-      const data = await r.json();
-
-      if (!r.ok) {
-        console.error(data);
-        return alert(`Erro ao calcular rota: ${data.error || r.status}`);
-      }
-
-      if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
-      const geo = data.geojson || data; // compat
-      routeLayer = L.geoJSON(geo).addTo(map);
-
-      // ajustar mapa
       try {
-        map.fitBounds(routeLayer.getBounds());
-      } catch (e) {}
+        show($('routeLoading'), true);
+        const oTxt = $('origin').value.trim();
+        const dTxt = $('destination').value.trim();
+        const o = await resolveInputToLatLng(oTxt);
+        const d = await resolveInputToLatLng(dTxt);
+        if (!o) { toast("Não consegui resolver a ORIGEM."); return; }
+        if (!d) { toast("Não consegui resolver o DESTINO."); return; }
 
-      showMetrics(data.summary || null);
+        $('origin').value = `${o.lat.toFixed(6)}, ${o.lng.toFixed(6)}`;
+        $('destination').value = `${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}`;
+
+        if (!originMarker) originMarker = createDraggableMarker(o.lat, o.lng, 'Origem');
+        if (!destMarker)   destMarker   = createDraggableMarker(d.lat, d.lng, 'Destino');
+
+        const waypoints = parseWaypoints();
+        const avoid_features = getAvoidFeatures();
+
+        const mode = $('mode').value;
+        let url = `${API_BASE}/rota-carro`;
+        let body = { origin: o, destination: d, waypoints, avoid_features };
+
+        if (mode === 'hgv') {
+          url = `${API_BASE}/rota-caminhao`;
+          const truck = {};
+          const h = parseFloat($('height').value);
+          const w = parseFloat($('width').value);
+          const l = parseFloat($('length').value);
+          const wt = parseFloat($('weight').value);
+          const ax = parseFloat($('axleload').value);
+          if (!Number.isNaN(h)) truck.height = h;
+          if (!Number.isNaN(w)) truck.width = w;
+          if (!Number.isNaN(l)) truck.length = l;
+          if (!Number.isNaN(wt)) truck.weight = wt;
+          if (!Number.isNaN(ax)) truck.axleload = ax;
+          body.truck = truck;
+        }
+
+        const r = await fetch(url, { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+        const data = await r.json();
+        if (!r.ok) { console.error(data); toast(data.error || `Erro ${r.status}`); return; }
+
+        if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+        const geo = data.geojson || data;
+        routeLayer = L.geoJSON(geo, {
+          style: { weight: 6, opacity: 0.9 }
+        }).addTo(map);
+        try { map.fitBounds(routeLayer.getBounds(), { padding: [20,20] }); } catch(e){}
+
+        showMetrics(data.summary || null);
+      } catch (err) {
+        console.error(err); toast("Falha ao calcular rota.");
+      } finally {
+        show($('routeLoading'), false);
+      }
     }
 
-    document.getElementById('btnRoute').onclick = route;
+    $('btnRoute').onclick = route;
 
-    document.getElementById('btnClear').onclick = () => {
-      document.getElementById('origin').value = "";
-      document.getElementById('destination').value = "";
-      document.getElementById('waypoints').value = "";
-      ['height','width','length','weight','axleload'].forEach(id=>document.getElementById(id).value="");
-      ['avoidTollways','avoidFerries','avoidHighways'].forEach(id=>document.getElementById(id).checked=false);
+    // ===== Actions =====
+    $('btnClear').onclick = () => {
+      ['origin','destination','waypoints','height','width','length','weight','axleload']
+        .forEach(id => $(id).value = "");
+      ['avoidTollways','avoidFerries','avoidHighways','useBounds']
+        .forEach(id => $(id).checked = false);
       if (originMarker) { map.removeLayer(originMarker); originMarker=null; }
-      if (destMarker) { map.removeLayer(destMarker); destMarker=null; }
-      if (routeLayer) { map.removeLayer(routeLayer); routeLayer=null; }
-      document.getElementById('metrics').style.display='none';
+      if (destMarker)   { map.removeLayer(destMarker);   destMarker=null; }
+      if (routeLayer)   { map.removeLayer(routeLayer);   routeLayer=null; }
+      show($('metrics'), false);
+      show($('resultsOrigin'), false);
+      show($('resultsDest'), false);
     };
 
-    // Mostra/oculta campos de caminhão conforme modo
-    function toggleTruckFields() {
-      const on = document.getElementById('mode').value === 'hgv';
-      document.getElementById('truckFields').style.display = on ? 'block' : 'none';
-    }
-    document.getElementById('mode').addEventListener('change', toggleTruckFields);
-    toggleTruckFields();
+    $('mode').addEventListener('change', ()=>{
+      const on = $('mode').value === 'hgv';
+      $('truckFields').style.display = on ? 'block' : 'none';
+    });
+    // inicial
+    $('truckFields').style.display = $('mode').value === 'hgv' ? 'block' : 'none';
+
+    $('btnSwap').onclick = () => {
+      const o = $('origin').value, d = $('destination').value;
+      $('origin').value = d; $('destination').value = o;
+      if (originMarker && destMarker) {
+        const a = originMarker.getLatLng(), b = destMarker.getLatLng();
+        originMarker.setLatLng(b); destMarker.setLatLng(a);
+      }
+      route();
+    };
+
+    $('btnUseMyLocation').onclick = () => {
+      if (!navigator.geolocation) return toast("Geolocalização não suportada.");
+      show($('originLoading'), true);
+      navigator.geolocation.getCurrentPosition((pos)=>{
+        const { latitude: lat, longitude: lng } = pos.coords;
+        $('origin').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        if (originMarker) map.removeLayer(originMarker);
+        originMarker = createDraggableMarker(lat, lng, 'Origem');
+        map.setView([lat, lng], 14);
+        show($('originLoading'), false);
+      }, (err)=>{
+        console.error(err); toast("Não foi possível obter sua localização.");
+        show($('originLoading'), false);
+      }, { enableHighAccuracy:true, timeout:8000 });
+    };
   </script>
 </body>
 </html>
