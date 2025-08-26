@@ -1,4 +1,5 @@
 import json
+import re
 import requests
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -94,6 +95,51 @@ def _extract_summary(geojson):
     except Exception:
         return None
 
+# ---- Parse de maxheight (OSM -> metros) ----
+
+_FEET_IN_M = 0.3048
+
+def _to_float(s):
+    try:
+        return float(s)
+    except Exception:
+        try:
+            return float(str(s).replace(",", "."))  # "3,8" -> 3.8
+        except Exception:
+            return None
+
+def _parse_maxheight_to_meters(raw):
+    """
+    Converte valores OSM comuns para metros.
+    Exemplos aceitos:
+      "3.5", "3,5", "3.5 m", "3,5 m", "10'6\"", "10' 6\"", "10 ft", "10ft"
+    Retorna float em metros ou None.
+    """
+    if not raw:
+        return None
+    s = str(raw).strip().lower()
+
+    # 1) Já em metros explícitos ou implícitos
+    m_num = re.match(r"^\s*([0-9]+[.,]?[0-9]*)\s*(m|meter|metros)?\s*$", s)
+    if m_num:
+        return _to_float(m_num.group(1))
+
+    # 2) Notação pés e polegadas: 10'6" ou 10' 6"
+    m_ft_in = re.match(r"^\s*(\d+)\s*'\s*([0-9]+)\s*\"?\s*$", s)
+    if m_ft_in:
+        ft = int(m_ft_in.group(1))
+        inch = int(m_ft_in.group(2))
+        return ft * _FEET_IN_M + (inch/12.0) * _FEET_IN_M
+
+    # 3) Apenas pés: "10ft", "10 ft"
+    m_ft = re.match(r"^\s*([0-9]+(?:[.,][0-9]+)?)\s*(ft|foot|feet)\s*$", s)
+    if m_ft:
+        return _to_float(m_ft.group(1)) * _FEET_IN_M
+
+    # 4) Valor puro onde não sabemos unidade: assume metros
+    val = _to_float(s)
+    return val
+
 # ---- Endpoints ----
 
 @csrf_exempt
@@ -108,10 +154,10 @@ def geocode_search(request):
     {
       "q": "texto de busca",                 # obrigatório
       "limit": 5,                            # default=5
-      "country": "BR",                       # default="BR" (Brasil inteiro). Envie "" para sem filtro de país.
+      "country": "BR",                       # default="BR" (BR inteiro). Envie "" para sem filtro.
       "lang": "pt",                          # default="pt"
-      "focus_lat": -23.5, "focus_lng": -46.6,# prioridade perto de um ponto (não restringe)
-      "rect_north": -22.0, "rect_south": -24.0, "rect_east": -43.0, "rect_west": -46.0  # restringe à área visível
+      "focus_lat": -23.5, "focus_lng": -46.6,# prioriza perto de um ponto (não restringe)
+      "rect_north": -22.0, "rect_south": -24.0, "rect_east": -43.0, "rect_west": -46.0  # restringe aos bounds
     }
     """
     if request.method != "POST":
@@ -127,7 +173,6 @@ def geocode_search(request):
 
         size = int(body.get("limit") or 5)
         country = body.get("country")
-        # Brasil por padrão; se quiser mundo todo, envie country = "" no request
         if country is None:
             country = "BR"
         lang = (body.get("lang") or "pt").strip()
@@ -139,16 +184,13 @@ def geocode_search(request):
             "lang": lang,
         }
 
-        # Filtro por país: só aplica se for string não vazia
         if isinstance(country, str) and country.strip():
             params["boundary.country"] = country.strip()
 
-        # Priorizar um ponto (não restringe resultados)
         if body.get("focus_lat") is not None and body.get("focus_lng") is not None:
             params["focus.point.lat"] = float(body["focus_lat"])
             params["focus.point.lon"] = float(body["focus_lng"])
 
-        # Restringir pelo retângulo da área visível (se os 4 valores vierem)
         rect_keys = ["rect_north", "rect_south", "rect_east", "rect_west"]
         if all(k in body for k in rect_keys):
             params["boundary.rect.min_lat"] = float(body["rect_south"])
@@ -260,7 +302,6 @@ def rota_caminhao(request):
             options["avoid_features"] = avoid
         if restrictions:
             options["profile_params"] = {"restrictions": restrictions}
-        # informe o tipo de veículo (recomendado p/ driving-hgv)
         options["vehicle_type"] = "hgv"
         if options:
             payload["options"] = options
@@ -273,3 +314,94 @@ def rota_caminhao(request):
 
     summary = _extract_summary(data)
     return JsonResponse({"summary": summary, "geojson": data}, status=200, safe=False)
+
+@csrf_exempt
+def obstaculos_altura(request):
+    """
+    POST /api/obstaculos-altura
+    Body:
+    {
+      "bbox": { "south": -25.60, "west": -54.65, "north": -25.45, "east": -54.50 },
+      "limit": 500,                 # opcional (default=500)
+      "vehicle_height_m": 3.8       # opcional: filtra só obstáculos < altura do veículo
+    }
+
+    Retorna:
+    {
+      "features": [
+        { "lat":..., "lng":..., "maxheight": "3.5 m", "maxheight_m": 3.5, "kind": "bridge|tunnel|way", "osm_id": 123 },
+        ...
+      ],
+      "filtered_by_height": true|false
+    }
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+        bbox = body.get("bbox") or {}
+        south = float(bbox["south"]); west = float(bbox["west"])
+        north = float(bbox["north"]); east = float(bbox["east"])
+        limit = int(body.get("limit") or 500)
+        vehicle_height_m = body.get("vehicle_height_m")
+        vehicle_height_m = float(vehicle_height_m) if vehicle_height_m is not None else None
+    except Exception:
+        return JsonResponse({"error": "bbox ou parâmetros inválidos"}, status=400)
+
+    overpass_url = "https://overpass-api.de/api/interpreter"
+    # Nós e vias com maxheight / maxheight:physical dentro do bbox
+    query = f"""
+    [out:json][timeout:25];
+    (
+      node["maxheight"]({south},{west},{north},{east});
+      way["maxheight"]({south},{west},{north},{east});
+      node["maxheight:physical"]({south},{west},{north},{east});
+      way["maxheight:physical"]({south},{west},{north},{east});
+    );
+    out tags center {limit};
+    """
+
+    try:
+        r = _session.post(overpass_url, data={"data": query}, timeout=DEFAULT_TIMEOUT)
+        data = r.json()
+    except Exception as e:
+        return JsonResponse({"error": f"Falha Overpass: {e}"}, status=502)
+
+    feats = []
+    for el in data.get("elements", []):
+        tags = el.get("tags", {}) or {}
+        raw = tags.get("maxheight") or tags.get("maxheight:physical")
+        if not raw:
+            continue
+
+        mh_m = _parse_maxheight_to_meters(raw)
+        # coordenadas
+        if el.get("type") == "node":
+            lat = el.get("lat"); lon = el.get("lon")
+        else:
+            center = el.get("center") or {}
+            lat = center.get("lat"); lon = center.get("lon")
+            if lat is None or lon is None:
+                continue
+
+        kind = "way"
+        if tags.get("bridge") == "yes": kind = "bridge"
+        if tags.get("tunnel") == "yes": kind = "tunnel"
+
+        feats.append({
+            "lat": lat, "lng": lon, "maxheight": raw, "maxheight_m": mh_m,
+            "kind": kind, "osm_id": el.get("id")
+        })
+
+    # filtro por altura do veículo (se passado)
+    filtered = False
+    if vehicle_height_m is not None:
+        filtered = True
+        feats = [f for f in feats if (f.get("maxheight_m") is not None and f["maxheight_m"] < vehicle_height_m)]
+
+    # aplica limite final, se necessário
+    if limit and len(feats) > limit:
+        feats = feats[:limit]
+
+    return JsonResponse({"features": feats, "filtered_by_height": filtered}, status=200)

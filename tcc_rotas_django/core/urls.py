@@ -16,8 +16,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-
+from app_rotas.views import obstaculos_altura
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('app_rotas.urls')),
+    path('api/obstaculos-altura', obstaculos_altura),
 ]

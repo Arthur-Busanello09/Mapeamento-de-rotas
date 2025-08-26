@@ -17,6 +17,7 @@
       --brand-weak: #e9ecef;
       --pill: #f3f4f6;
       --shadow: 0 8px 30px rgba(0,0,0,.06);
+      --danger: #ef4444;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -29,17 +30,13 @@
         --brand-weak: #243447;
         --pill: #1f2937;
         --shadow: 0 8px 30px rgba(0,0,0,.35);
+        --danger: #ef4444;
       }
     }
     * { box-sizing: border-box }
     html, body { height:100%; margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial }
-    .app {
-      display:grid; grid-template-columns: min(380px, 100%) 1fr; height:100%;
-    }
-    .panel {
-      padding:16px; border-right:1px solid var(--border); background:var(--card);
-      box-shadow: var(--shadow); z-index:10; overflow:auto;
-    }
+    .app { display:grid; grid-template-columns: min(400px, 100%) 1fr; height:100%; }
+    .panel { padding:16px; border-right:1px solid var(--border); background:var(--card); box-shadow: var(--shadow); z-index:10; overflow:auto; }
     .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px }
     .title { font-size:18px; font-weight:700 }
     .badge { font-size:12px; color:var(--muted) }
@@ -48,7 +45,7 @@
     input[type="text"], input[type="number"], select {
       width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:transparent; color:var(--text); outline:none;
     }
-    .row { display:flex; gap:8px }
+    .row { display:flex; gap:8px; align-items:center }
     .row > .col { flex:1 }
     .btn {
       display:inline-flex; align-items:center; gap:8px;
@@ -69,14 +66,22 @@
 
     #map { position: relative; height:100%; width:100%; }
     .map-wrap { position:relative }
+
     .toast {
-      position:fixed; right:16px; bottom:16px; background:#ef4444; color:#fff; padding:10px 12px; border-radius:10px;
-      box-shadow: var(--shadow); font-size:13px; display:none;
+      position:fixed; right:16px; bottom:16px; background:var(--danger); color:#fff;
+      padding:10px 12px; border-radius:10px; box-shadow: var(--shadow); font-size:13px; display:none;
     }
-    .loading {
-      display:none; font-size:12px; color:var(--muted); margin-left:8px;
-    }
+    .loading { display:none; font-size:12px; color:var(--muted); margin-left:8px; }
     .divider { height:1px; background:var(--border); margin:12px 0 }
+
+    .legend {
+      margin-top:8px; font-size:12px; color:var(--muted);
+      display:flex; align-items:center; gap:8px;
+    }
+    .legend .dot {
+      width:12px; height:12px; border-radius:4px; background:var(--danger);
+      display:inline-block;
+    }
   </style>
 </head>
 <body>
@@ -171,6 +176,17 @@
         <div class="muted">Preencha apenas o necessário. (Peso/eixo em kg — o backend converte para t.)</div>
       </div>
 
+      <div class="divider"></div>
+
+      <div class="field">
+        <label>Segurança</label>
+        <div class="row">
+          <label class="switch"><input type="checkbox" id="showLow"/> Mostrar limites de altura</label>
+          <span class="muted" id="lowCount" style="margin-left:auto"></span>
+        </div>
+        <div class="legend"><span class="dot"></span> Marcadores “H” = ponto com maxheight</div>
+      </div>
+
       <div class="field">
         <div class="row">
           <button class="btn" id="btnRoute">Traçar rota</button>
@@ -201,12 +217,18 @@
 
     // ===== Map =====
     const map = L.map('map', { zoomControl: true }).setView([-23.55, -46.63], 5);
-    const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
-    let originMarker = null, destMarker = null, routeLayer = null;
+    let originMarker = null, destMarker = null, routeLayer = null, lowLayer = null;
     let activeField = "origin";
+
+    const lowIcon = L.divIcon({
+      className: "lowclear-icon",
+      html: '<div style="background:#ef4444;color:#fff;padding:4px 6px;border-radius:8px;font-size:11px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.25)">H</div>',
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
 
     function setActive(field) { activeField = field; }
     $('origin').addEventListener('focus', () => setActive('origin'));
@@ -362,6 +384,43 @@
       show(el, true);
     }
 
+    // ===== Obstáculos de altura =====
+    async function fetchLowClearancesForBounds(bounds, vehicleHeightM) {
+      const body = {
+        bbox: {
+          south: bounds.getSouth(),
+          west:  bounds.getWest(),
+          north: bounds.getNorth(),
+          east:  bounds.getEast()
+        },
+        limit: 500
+      };
+      if (typeof vehicleHeightM === 'number' && !Number.isNaN(vehicleHeightM)) {
+        body.vehicle_height_m = vehicleHeightM;
+      }
+
+      const r = await fetch(`${API_BASE}/obstaculos-altura`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      if (!r.ok) { console.error(data); toast("Erro ao buscar limites de altura."); return; }
+
+      if (lowLayer) { map.removeLayer(lowLayer); lowLayer = null; }
+      lowLayer = L.layerGroup();
+
+      (data.features || []).forEach(f => {
+        const m = L.marker([f.lat, f.lng], { icon: lowIcon })
+          .bindPopup(`<b>Limite de altura</b><br>maxheight: ${f.maxheight}${f.maxheight_m ? ` (${f.maxheight_m.toFixed(2)} m)` : ''}<br>tipo: ${f.kind}<br>OSM id: ${f.osm_id}`);
+        lowLayer.addLayer(m);
+      });
+
+      if (lowLayer.getLayers().length && $('showLow').checked) {
+        lowLayer.addTo(map);
+      }
+      $('lowCount').textContent = `${(data.features || []).length} ponto(s)`;
+    }
+
     // ===== Route =====
     async function route() {
       try {
@@ -408,12 +467,15 @@
 
         if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
         const geo = data.geojson || data;
-        routeLayer = L.geoJSON(geo, {
-          style: { weight: 6, opacity: 0.9 }
-        }).addTo(map);
+        routeLayer = L.geoJSON(geo, { style: { weight: 6, opacity: 0.9 } }).addTo(map);
         try { map.fitBounds(routeLayer.getBounds(), { padding: [20,20] }); } catch(e){}
 
         showMetrics(data.summary || null);
+
+        // Após traçar a rota, buscar limites de altura (se habilitado)
+        const b = routeLayer.getBounds();
+        const vehicleHeightM = ($('mode').value === 'hgv') ? parseFloat($('height').value) : undefined;
+        await fetchLowClearancesForBounds(b, vehicleHeightM);
       } catch (err) {
         console.error(err); toast("Falha ao calcular rota.");
       } finally {
@@ -427,11 +489,13 @@
     $('btnClear').onclick = () => {
       ['origin','destination','waypoints','height','width','length','weight','axleload']
         .forEach(id => $(id).value = "");
-      ['avoidTollways','avoidFerries','avoidHighways','useBounds']
+      ['avoidTollways','avoidFerries','avoidHighways','useBounds','showLow']
         .forEach(id => $(id).checked = false);
       if (originMarker) { map.removeLayer(originMarker); originMarker=null; }
       if (destMarker)   { map.removeLayer(destMarker);   destMarker=null; }
       if (routeLayer)   { map.removeLayer(routeLayer);   routeLayer=null; }
+      if (lowLayer)     { map.removeLayer(lowLayer);     lowLayer=null; }
+      $('lowCount').textContent = "";
       show($('metrics'), false);
       show($('resultsOrigin'), false);
       show($('resultsDest'), false);
@@ -441,7 +505,6 @@
       const on = $('mode').value === 'hgv';
       $('truckFields').style.display = on ? 'block' : 'none';
     });
-    // inicial
     $('truckFields').style.display = $('mode').value === 'hgv' ? 'block' : 'none';
 
     $('btnSwap').onclick = () => {
@@ -469,6 +532,13 @@
         show($('originLoading'), false);
       }, { enableHighAccuracy:true, timeout:8000 });
     };
+
+    // Mostrar/ocultar camada de “low clearance”
+    $('showLow').addEventListener('change', ()=>{
+      if (!lowLayer) return;
+      if ($('showLow').checked) lowLayer.addTo(map);
+      else map.removeLayer(lowLayer);
+    });
   </script>
 </body>
 </html>
